@@ -1,0 +1,59 @@
+#include <LiquidCrystal_I2C.h> // 引入 I2C LCD 函式庫，用於控制 LCD 顯示屏
+LiquidCrystal_I2C lcd(0x27, 20, 4); // 初始化 LCD，位址為 0x27，規格為 20 列 x 4 行
+
+// 定義全域變數
+volatile unsigned int count = 0;   // 記錄磁鐵通過感測器的次數，需使用 volatile 因中斷會改變此值
+const byte counterPin = 2;         // 設定計數使用的數位腳位為 2（中斷腳位）
+unsigned long count_start;         // 記錄開始計數的時間（以微秒為單位）
+unsigned int rpm;                  // 存放計算出的每分鐘轉速（RPM）
+const byte magnet_num = 3;         // 定義磁鐵數量，用於計算 RPM
+unsigned long lastDebounceTime = 0; // 上次記錄計數的時間，用於消抖
+const int debounceDelay = 200;     // 消抖延遲時間（微秒），避免雜訊影響計數
+const unsigned long one_sec = 1000000; // 定義一秒的微秒值，用於計時
+
+// 中斷服務程式（ISR），每次感測到訊號觸發執行
+void counter() {
+  // 如果距離上次記錄的時間超過消抖延遲，則增加計數
+  if ((micros() - lastDebounceTime) > debounceDelay) {
+    count++;                      // 增加計數
+    lastDebounceTime = micros();  // 更新最後記錄時間
+  }
+}
+
+void setup() {
+  // 初始化 LCD
+  lcd.begin(16, 2);       // 設定 LCD 為 16 列 x 2 行
+  lcd.init();             // 啟動 LCD 模組
+  lcd.backlight();        // 開啟背光
+  lcd.clear();            // 清除 LCD 顯示內容
+  lcd.setCursor(0, 0);    // 將光標移動到第一行第一列
+  lcd.print("RPM= ");     // 顯示 "RPM=" 作為固定文字
+  
+  // 設置腳位與中斷
+  pinMode(counterPin, INPUT);             // 設定腳位為輸入模式
+  attachInterrupt(0, counter, FALLING);   // 設置中斷，偵測下降緣訊號時執行 counter()
+  
+  // 初始化計數與時間
+  count = 0;
+  rpm = 0;
+  count_start = 0;
+}
+
+void loop() {
+  // 每秒更新一次 RPM 計算
+  if (micros() - count_start >= one_sec) { // 如果時間超過一秒
+    detachInterrupt(0);                   // 暫時關閉中斷，避免干擾計算
+    
+    // 計算 RPM：每秒的事件數量轉換為每分鐘的事件數量，並考慮磁鐵數量
+    rpm = (count * 60) / magnet_num;      
+    count_start = micros();               // 更新開始計數的時間
+    count = 0;                            // 重置計數器
+    
+    // 更新 LCD 顯示內容
+    lcd.setCursor(5, 0);                  // 將光標移到第一行第六列（"RPM=" 後的位置）
+    lcd.print(rpm);                       // 顯示計算出的 RPM 值
+    lcd.print(" RPM   ");                 // 清除多餘字元並固定顯示格式
+    
+    attachInterrupt(0, counter, FALLING); // 重新啟用中斷
+  }
+}
